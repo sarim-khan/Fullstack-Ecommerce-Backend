@@ -20,6 +20,8 @@ const cartRouter = require('./routes/Cart');
 const ordersRouter = require('./routes/Order');
 const { User } = require('./model/User');
 const { isAuth, sanitizeUser, cookieExtractor } = require('./services/common');
+const path = require('path');
+
 
 const SECRET_KEY = 'SECRET_KEY';
 // JWT options
@@ -29,7 +31,9 @@ const opts = {};
 opts.jwtFromRequest = cookieExtractor;
 opts.secretOrKey = SECRET_KEY; // TODO: should not be in code;
 
+server.use(express.raw({ type: 'application/json' }));
 //middlewares
+server.use(express.static(path.resolve(__dirname, 'build')));
 
 server.use(express.static('build'))
 server.use(cookieParser());
@@ -44,10 +48,13 @@ server.use(passport.authenticate('session'));
 server.use(
   cors({
     exposedHeaders: ['X-Total-Count'],
+    // credentials: true,
+    // origin: ["http://localhost:3000"]
   })
 );
-server.use(express.raw({ type: 'application/json' }));
+
 server.use(express.json()); // to parse req.body
+
 server.use('/products', isAuth(), productsRouter.router);
 // we can also use JWT token for client-only auth
 server.use('/categories', isAuth(), categoriesRouter.router);
@@ -56,7 +63,6 @@ server.use('/users', isAuth(), usersRouter.router);
 server.use('/auth', authRouter.router);
 server.use('/cart', isAuth(), cartRouter.router);
 server.use('/orders', isAuth(), ordersRouter.router);
-
 // Passport Strategies
 passport.use(
   'local',
@@ -81,7 +87,8 @@ passport.use(
               return done(null, false, { message: 'invalid credentials' });
             }
             const token = jwt.sign(sanitizeUser(user), SECRET_KEY);
-            done(null, { id: user.id, role: user.role }); // this lines sends to serializer
+            console.log(token)
+            done(null, { id: user.id, role: user.role, token }); // this lines sends to serializer
           }
         );
       } catch (err) {
@@ -153,43 +160,65 @@ server.post("/create-payment-intent", async (req, res) => {
 // TODO: we will capture actual order after deploying out server live on public URL
 
 const endpointSecret = "whsec_0e1456a83b60b01b3133d4dbe06afa98f384c2837645c364ee0d5382f6fa3ca2";
+// const endpointSecret = "pk_test_51OySoGSBPUk7V735nXIg4CFLAJNwICDS7fOgtp30gpfky8AvlczVEQW2yKfu5AVrOFE1m8B64NbltRnsk1Gr2EzH00WDO7NusP"
+// const endpointSecret = "t=1711798711,v1=9872f0a6e6905d157be045710389f8bb57178493886567df103a5e36158ad117,v0=1daaf64e235e33cc24d54512ae06ba9db499ae7a7da1dda6357fd47b86b6f948"
 
-server.post('/webhook', express.raw({ type: 'application/json' }), (request, response) => {
-  const sig = request.headers['stripe-signature'];
+server.post(
+  '/webhook',
+  express.raw({ type: 'application/json' }),
+  async (request, response) => {
+    console.log('BOT')
+    const sig = request.headers['stripe-signature'];
+    console.log('170')
 
-  let event;
+    let event;
 
-  try {
-    event = stripe.webhooks.constructEvent(request.body, sig, endpointSecret);
-  } catch (err) {
-    response.status(400).send(`Webhook Error: ${err.message}`);
-    return;
+    try {
+      console.log('175  ', sig);
+      event = stripe.webhooks.constructEvent(request.body.toString(), sig, endpointSecret);
+
+    } catch (err) {
+      console.log('179 ERROR', err)
+
+      response.status(400).send(`Webhook Error: ${err.message}`);
+      return;
+    }
+
+    // Handle the event
+    switch (event.type) {
+      case 'payment_intent.succeeded':
+        const paymentIntentSucceeded = event.data.object;
+
+        const order = await Order.findById(
+          paymentIntentSucceeded.metadata.orderId
+        );
+        order.paymentStatus = 'received';
+        await order.save();
+
+        break;
+      // ... handle other event types
+      default:
+        console.log(`Unhandled event type ${event.type}`);
+    }
+
+    // Return a 200 response to acknowledge receipt of the event
+    response.send();
   }
-
-  // Handle the event
-  switch (event.type) {
-    case 'payment_intent.succeeded':
-      const paymentIntentSucceeded = event.data.object;
-      console.log({ paymentIntentSucceeded })
-      // Then define and call a function to handle the event payment_intent.succeeded
-      break;
-    // ... handle other event types
-    default:
-      console.log(`Unhandled event type ${event.type}`);
-  }
-
-  // Return a 200 response to acknowledge receipt of the event
-  response.send();
-});
+);
 
 
+// this line we add to make react router work in case of other routes doesnt match
+server.get('*', (req, res) =>
+  res.sendFile(path.resolve('build', 'index.html'))
+);
 
 
 
 main().catch((err) => console.log(err));
 
 async function main() {
-  await mongoose.connect('mongodb://127.0.0.1:27017/ecommerce');
+  // await mongoose.connect('mongodb://127.0.0.1:27017/ecommerce');
+  await mongoose.connect('mongodb+srv://sarimkhan:Mv4J2C9yCobwnXiF@cluster0.hs1r4nj.mongodb.net/ecommerce');
   console.log('database connected');
 }
 
