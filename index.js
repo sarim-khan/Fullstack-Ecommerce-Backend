@@ -1,3 +1,4 @@
+require('dotenv').config()
 const express = require('express');
 const server = express();
 const mongoose = require('mongoose');
@@ -23,15 +24,14 @@ const { isAuth, sanitizeUser, cookieExtractor } = require('./services/common');
 const path = require('path');
 
 
-const SECRET_KEY = 'SECRET_KEY';
 // JWT options
 
 
 const opts = {};
 opts.jwtFromRequest = cookieExtractor;
-opts.secretOrKey = SECRET_KEY; // TODO: should not be in code;
+opts.secretOrKey = process.env.JWT_SECRET_KEY;
 
-server.use(express.raw({ type: 'application/json' }));
+// server.use(express.raw({ type: 'application/json' }));
 //middlewares
 server.use(express.static(path.resolve(__dirname, 'build')));
 
@@ -39,7 +39,7 @@ server.use(express.static('build'))
 server.use(cookieParser());
 server.use(
   session({
-    secret: 'keyboard cat',
+    secret: process.env.SESSION_KEY,
     resave: false, // don't save session if unmodified
     saveUninitialized: false, // don't create session until something stored
   })
@@ -55,14 +55,14 @@ server.use(
 
 server.use(express.json()); // to parse req.body
 
-server.use('/products', isAuth(), productsRouter.router);
+server.use('/api/products', isAuth(), productsRouter.router);
 // we can also use JWT token for client-only auth
-server.use('/categories', isAuth(), categoriesRouter.router);
-server.use('/brands', isAuth(), brandsRouter.router);
-server.use('/users', isAuth(), usersRouter.router);
-server.use('/auth', authRouter.router);
-server.use('/cart', isAuth(), cartRouter.router);
-server.use('/orders', isAuth(), ordersRouter.router);
+server.use('/api/categories', isAuth(), categoriesRouter.router);
+server.use('/api/brands', isAuth(), brandsRouter.router);
+server.use('/api/users', isAuth(), usersRouter.router);
+server.use('/api/auth', authRouter.router);
+server.use('/api/cart', isAuth(), cartRouter.router);
+server.use('/api/orders', isAuth(), ordersRouter.router);
 // Passport Strategies
 passport.use(
   'local',
@@ -86,8 +86,7 @@ passport.use(
             if (!crypto.timingSafeEqual(user.password, hashedPassword)) {
               return done(null, false, { message: 'invalid credentials' });
             }
-            const token = jwt.sign(sanitizeUser(user), SECRET_KEY);
-            console.log(token)
+            const token = jwt.sign(sanitizeUser(user), process.env.JWT_SECRET_KEY);
             done(null, { id: user.id, role: user.role, token }); // this lines sends to serializer
           }
         );
@@ -135,16 +134,28 @@ passport.deserializeUser(function (user, cb) {
 
 
 // This is your test secret API key.
-const stripe = require("stripe")('sk_test_51OySoGSBPUk7V735KVephCquLJOyw7VhfxnayXj3UQJ2TEBjYvOeGtXKEzkmmplrY99fSEnMTGvOFgx9s4BfFokY00xRwOWc4s');
+const stripe = require("stripe")(process.env.STRIPE_SERVER_KEY);
 
 
-server.post("/create-payment-intent", async (req, res) => {
+server.post("/api/create-payment-intent", async (req, res) => {
   const { totalAmount } = req.body;
 
+  console.log("OPOPOPOPOP  ", req.body)
   // Create a PaymentIntent with the order amount and currency
   const paymentIntent = await stripe.paymentIntents.create({
     amount: totalAmount * 100, // for decimal compensation
     currency: "inr",
+    shipping: {
+      name: 'Jenny Rosen',
+      address: {
+        line1: '510 Townsend St',
+        postal_code: '98140',
+        city: 'San Francisco',
+        state: 'CA',
+        country: 'US',
+      },
+    },
+    description: 'Software development services',
     automatic_payment_methods: {
       enabled: true,
     },
@@ -157,9 +168,8 @@ server.post("/create-payment-intent", async (req, res) => {
 
 // Webhook
 
-// TODO: we will capture actual order after deploying out server live on public URL
 
-const endpointSecret = "whsec_0e1456a83b60b01b3133d4dbe06afa98f384c2837645c364ee0d5382f6fa3ca2";
+const endpointSecret = process.env.ENDPOINT_SECRET;
 // const endpointSecret = "pk_test_51OySoGSBPUk7V735nXIg4CFLAJNwICDS7fOgtp30gpfky8AvlczVEQW2yKfu5AVrOFE1m8B64NbltRnsk1Gr2EzH00WDO7NusP"
 // const endpointSecret = "t=1711798711,v1=9872f0a6e6905d157be045710389f8bb57178493886567df103a5e36158ad117,v0=1daaf64e235e33cc24d54512ae06ba9db499ae7a7da1dda6357fd47b86b6f948"
 
@@ -218,10 +228,10 @@ main().catch((err) => console.log(err));
 
 async function main() {
   // await mongoose.connect('mongodb://127.0.0.1:27017/ecommerce');
-  await mongoose.connect('mongodb+srv://sarimkhan:Mv4J2C9yCobwnXiF@cluster0.hs1r4nj.mongodb.net/ecommerce');
+  await mongoose.connect(process.env.MONGODB_URL);
   console.log('database connected');
 }
 
-server.listen(8080, () => {
+server.listen(process.env.PORT, () => {
   console.log('server started');
 });
